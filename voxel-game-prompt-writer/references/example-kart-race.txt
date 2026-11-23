@@ -1,0 +1,83 @@
+Voxel Kart Cup
+Build a single-file HTML5 game, "Voxel Kart Cup": a six-kart, 3-lap race in pixel-art 3D on a floating voxel island. three.js r128 from cdnjs, everything else inline, no asset files, no build step for the player. three.js and Google Fonts need internet: load cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js, on error the same build from cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js, and if both fail show "three.js could not load - check your connection" in the stage; fonts fall back to system stacks.
+
+ARCHITECTURE
+
+* Split sim from render. All game logic is one plain-JS sim in its own <script> block: no DOM, no THREE, no Date, no Math.random (seeded mulberry32), fixed step 1/120 s. API: createSim(seed, mode, level, laps), sim.step(), sim.input(slot, intent) with intent = steer, throttle, brake, drift; sim.state is plain data; sim.events feeds sounds, captions and log. AI and humans write the same intents.
+* The renderer reads state, interpolates the last two steps and never writes it. Accumulator loop, at most 8 steps per frame; game speed multiplies steps, not dt. Every phase has a maximum duration and a fallback transition.
+* Expose window.GAME (createSim, runHeadless(seconds, opts) returning stats); the sim block must run unchanged in Node via vm, so tests step thousands of seconds without a browser.
+
+LOOK
+
+* Render to a low-res target (2 px art pixels on wide stages, 1 px on phones; slider 1-6; NearestFilter, CSS image-rendering: pixelated), then a post pass: depth-based outlines, snap every pixel to one fixed 90-colour OKLab palette, ordered 4x4 Bayer dither. Orthographic camera with smooth azimuth / elevation / zoom, pixel-snapped in view space so voxels never shimmer. Sun shadow map; Day / Dusk / Night / Auto lighting. Eight lamp posts (hairpin, chicane, gantry) must be registered as point lights BEFORE the lights are initialised, otherwise night is pitch black; no point-light shadows. r128 has no CapsuleGeometry and no core mergeBufferGeometries; use renderer.outputEncoding.
+* Island: a 130 x 85 m slab of 1 m voxel columns with a rounded outline plus a 30 x 22 m satellite joined by a wooden bridge; grassy top (three tones from noise), layered rock strata underneath, floating rocks; solid through the centre from any angle. A ground canvas paints the 9 m asphalt track (640 m lap), red-white kerbs, chequered start line, six grid boxes, sand traps.
+* Track: start straight under a gantry with start lights; a timing tower with a canvas scoreboard (positions in kart colours, lap n/3, best lap; redrawn only on change); hairpin, S chicane, the bridge with a 0.6 m ramp lip, a rock tunnel, four boost pads, tyre walls, twelve invisible checkpoint gates.
+* Surroundings: two tiered wooden grandstands (straight, hairpin) with an instanced crowd in the six kart colours who jump more at overtakes and the finish; pit garages, juice stand, marshal posts, palms, gulls, clouds in the sky shader.
+* Doll's-house lift: grandstands, timing tower and tunnel rock are lift groups; a group the sight line from camera target to camera crosses below roof height slides up in 0.4 s (bounding-box test) and stops casting shadows; option "Stands lift away". Merge static meshes by material with a small inline merge (bake matrixWorld, concatenate attributes, castShadow after merging); karts, flags and start lights stay separate.
+
+KARTS AND DRIVERS
+
+* Karts from boxes: tray, seat, engine, bumpers, four wheels on axle groups (fronts steer, all spin), canvas number plate. Six teams, one colour each, distinct after palette snapping: Coral, Lagoon, Mango, Basalt, Lime, Orchid.
+* Drivers: jointed box rigs (hips, torso, helmeted head, upper arms and forearms on shoulder and elbow groups, hands on the wheel, tucked legs). A pose function per state returns channels (torso lean / twist, head yaw / pitch, shoulders (pitch, roll), elbows, wheel angle, bounce): grid idle (rev nods), steer (lean in), drift (counter-steer, head to apex), boost (tuck), bump flinch, spin-out wobble, airborne, celebrate (stand, fist pump), sad (slump); marshals wave green, yellow and chequered flags. Keyframed ease-in-out, then a critically damped spring per channel so poses never snap. Four suspension springs keep the wheels on the track.
+
+DRIVING PHYSICS
+
+* Integrate at 120 Hz on the track plane with heights from a heightfield; gravity 9.81 when airborne. Mass 150 kg, top speed 20 m/s, 0-20 m/s in 3.2 s, braking 12 m/s2, rolling resistance 0.4 m/s2, drag scaled so 20 m/s is the limit. Grass caps speed at 9 m/s, sand at 5 m/s.
+* Steering: bicycle model, wheelbase 1.05 m, max steer 28 degrees falling to 9 at top speed; lateral grip 1.3 g on asphalt, 0.7 g on grass; beyond it the kart slides, lateral velocity decaying at 6 per s.
+* Drift: hold drift while steering above 10 m/s: grip 0.9 g, yaw 20-35 degrees into the turn, charge +1 per s; release at 1.0 for +4 m/s over 0.8 s, at 2.0 for +6 m/s over 1.2 s (blue, then orange sparks).
+* Boost pad +6 m/s for 1.0 s, cap 26 m/s. Slipstream: 1.5 s inside a 6 m, 15 degree cone behind a kart gives +1.5 m/s.
+* Karts are 1.4 x 0.9 m oriented boxes, restitution 0.3; walls 0.2 with 30% speed loss head-on; sweep against walls so nothing tunnels at 26 m/s. Off the bridge edge: fall, respawn at the last checkpoint after 2.5 s.
+
+RACE RULES
+
+* 3 laps (selectable 1 / 3 / 5); first grid random, then reversed results. Three red lights 1 s apart, then green; throttle in the last 0.3 s gives a start boost (+3 m/s), earlier throttle stalls for 0.6 s.
+* A lap counts only after all 12 checkpoints in order. Positions from laps, checkpoint index and distance to the next gate, every step. Driving backwards for 3 s shows WRONG WAY.
+* The race ends 20 s after the winner or when all finish; the rest are ranked by progress. Points 10 / 8 / 6 / 4 / 2 / 1; a cup is 4 races, then a new cup starts (endless).
+* Calls: GO!, START BOOST, STALLED, OVERTAKE, NEW LEADER, FASTEST LAP, BIG DRIFT, SLIPSTREAM, SPIN OUT, OFF THE EDGE, WRONG WAY, FINAL LAP, PHOTO FINISH (gap under 0.1 s), WINNER. After the finish: chequered flag, top three celebrate, the rest slump, next grid 6 s later.
+
+DRIVING AND CONTACT
+
+* Bump: side contact above 3 m/s relative speed yaws the hit kart 15 degrees with a flinch; above 8 m/s it is a SPIN OUT: 1.2 s spin, speed down to 30%.
+* Effects: grass flecks, sand puffs, skid marks (400-segment ring buffer), wall sparks.
+* Levels Easy / Normal / Pro: AI top speed 92 / 97 / 100%, line error 1.2 / 0.6 / 0.25 m, drift use 30 / 70 / 95%, reaction 0.5 / 0.35 / 0.2 s, late braking at the hairpin 8 / 4 / 1% per lap. Rubber band on Easy and Normal only: AI behind the leading human +4 / +2% top speed, ahead -4 / -2%.
+
+AI (all karts not driven by a human)
+
+* Precompute a racing line: spline through the apexes, target speed 0.95 x sqrt(grip x g x radius), braking points from a 40 m look-ahead at 12 m/s2.
+* Pure-pursuit steering with a look-ahead of 6 + 0.4 x speed metres, plus a per-driver lateral offset from smooth noise (scaled by level) so karts do not stack. Overtake: a slower kart within 8 m ahead triggers a 1.6 m shift to the roomier side, back after passing.
+* Drift where the radius is under 18 m above 12 m/s, release at charge 1.0 or at the corner exit; take boost pads within 2 m of the line; draft on straights.
+* Recover: under 1 m/s for 1.5 s, reverse 1 s with opposite steer. Never drive the wrong way for more than 1 s. Never read human input.
+
+HUMAN CONTROL
+
+* Modes: Watch (all six on autopilot, the default), One player (Coral), Two players on one keyboard (Coral and Lagoon). A human slot overrides the autopilot for its own kart only.
+* P1: W / S throttle / brake-reverse, A / D steer, Left Shift drift; P2: arrows, Right Shift drift; one player accepts both sets. Read e.code, preventDefault Space and arrows, blur panel buttons after a click so Space never re-presses them. During the countdown only throttle counts. An arrow bobs over each human kart.
+* Touch: a steering pad plus Gas / Brake / Drift buttons in a dock below the stage, only on (pointer: coarse); pointer capture, touch-action: none.
+
+CAMERAS
+
+* Director (default): grid flyover in the countdown, chase cam on the leader or the human, trackside cut for overtakes within 30 m of a TV point, close on the winner, island orbit between races; in Two players it frames both humans. Fixed: Chase, Trackside TV, Hairpin, Bridge, Top-down, Island. Zoom in metres of visible width, aspect-corrected. Drag to turn, wheel / pinch to zoom, Q / E rotate, 1-6 pick, L light, P pause, N new race, M sound; a user drag pauses the director for 4 s.
+
+UI (CSS tokens on :root, dark scheme; fonts: Bungee, Barlow Condensed, Public Sans, system fallbacks)
+
+* Masthead with race n/4 and the cup leader; a framed stage with the race bug (six rows: position, swatch, name, gap, lap), lap timer and best lap, drift charge bar for humans, call-out captions, chips (paused / speed / camera / quality tier) and the latest log line. Control panel on the right (below on phones): mode, level, laps, speed 0.5x / 1x / 2x / 4x, New race / Pause; how-to-play; camera, light, turn / zoom, pixel size, Outlines / Dither / Raw 3D / Sound / Stands lift; cup stats (wins, podiums, fastest laps, overtakes, spin-outs, best lap, points); race log; a "How it's drawn" note with the palette swatches. No horizontal scroll at 390 px.
+* Sound: Web Audio API only, off by default; create or resume the AudioContext in the click that enables it, otherwise it stays silent. Engines: sawtooth plus square oscillators, pitch 80-260 Hz with speed, 3 nearest karts only; drift screech (band-passed noise), boost whoosh (rising noise sweep), bump clunk, wall thud, countdown beeps (440 Hz three times, 880 Hz on green), lap chime, crowd cheer, wind ambience, an occasional gull.
+
+SCOPE
+
+* MUST: sim / render split, rendering pipeline, island and track, six karts with drivers and poses, physics, all rules and calls, AI on every level, Watch + One player, director and fixed cameras, panel, stats, log, sound.
+* IF ROOM, only after every MUST works, cut in reverse order: Two players, touch dock, skid marks, tunnel lift, marshal flags, gulls, clouds, Auto light. Never cut a MUST for an IF ROOM item.
+
+PERFORMANCE
+
+* Target 30 fps at 2 px on a mid-range laptop with integrated graphics, 30 fps at 1 px on a recent phone. Budget: under 150 draw calls, InstancedMesh crowd, one 2048 shadow map (1024 on phones), at most 8 point lights. Below 28 fps over 2 s, step down: shadow map 1024 -> crowd every other frame -> no skid marks or sparks -> art pixel +1 -> shadows off; show the tier in a chip. Never slow the sim.
+
+QUALITY BAR
+
+* Node tests, seeds 1-50: 50 races per level in Watch, 20 per level in each human mode with a scripted bot on sim.input. Assert: no NaN or Infinity, no stuck phase (countdown 4 s, race 6 min, podium 8 s), no lap without all checkpoints in order, positions always a permutation of 1-6, and the same seed gives the same final state hash.
+* Targets on Normal: average lap 36-46 s, winner-to-last gap 4-15 s, at least 6 overtakes and 0.5-3 spin-outs per race, under 0.2 AI falls per race. Out of range: tune grip, look-ahead, line error and rubber band, rerun; after 3 rounds report the measured values instead of hiding them.
+* Browser: no console errors on load and after 60 s of Watch; every control and key works; touch dock only on coarse pointers; no horizontal scroll at 390 px; fps measured or marked unmeasured. Headless software GL is too slow for real-time checks: the renderer gets an error check and a screenshot only. Scan the file for personal data (emails, absolute paths) and broken characters before publishing.
+
+REPORT
+
+* End with an honest report: what is done; what was verified and how (test counts, averages, fps); what was not verified; what was simplified or cut (name the IF ROOM items dropped); known bugs.

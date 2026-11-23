@@ -1,0 +1,50 @@
+Beach Volleyball
+Build a single-file HTML5 game, "Beach Volleyball": a 2 vs 2 beach volleyball match in pixel-art 3D on a floating voxel island. three.js r128 from cdnjs, everything else inline, no asset files, no build step for the player.
+LOOK
+
+* Render the 3D scene to a low-res target (default 2 px art pixels on wide stages, 1 px on phones; slider 1-6), then a post pass: depth-based outlines, snap every pixel to one fixed 90-colour OKLab palette, ordered Bayer dither. Orthographic camera with smooth azimuth / elevation / zoom, pixel-snapped. Sun shadow map; day / dusk / night lighting. Four floodlight poles at the court corners must be registered as point lights BEFORE the lights are initialised, otherwise night is pitch black.
+* Island: a slab of 1 m voxel columns with a rounded outline, a sandy top (three sand tones from noise), a grass rim, boardwalks, layered rock strata underneath with floating rocks. The slab is solid through the centre (no holes from any angle). A ground canvas paints sand, boardwalks, the 16 x 8 m court rectangle with blue boundary lines and the centre line under the net.
+* Court: two net posts (padded, 2.43 m tape height), a net with a canvas grid texture that sways and shivers when touched, white tapes, red-white antennae, a referee's high chair on the far side with a roof, two benches with towels, a big scoreboard sign above the far stand (canvas texture redrawn when the score changes: team names, two 2-digit scores, "TO 21", a dot for the serving team).
+* Surroundings: four tiered wooden stands (long ones behind both sidelines, short ones behind the baselines) with an instanced crowd of voxel spectators in both teams' colours who bob and jump more after points; a tiki bar, lifeguard tower, surfboards, striped umbrellas, palms on the rim, bushes, a few spare balls and sandals, drifting gulls, clouds in the sky shader.
+* Doll's-house lift: every stand is its own lift group; a group that the sight line from the camera target to the camera crosses below roof height slides up and out of the way (and stops casting shadows). Option "Stands lift away" to turn it off. Merge static meshes by material after building (animated roots such as the net are excluded).
+
+PLAYERS (four voxel athletes + a referee)
+
+* Jointed rigs built from boxes: hips, torso, head with hair / cap / ponytail, upper arms and forearms on shoulder and elbow groups, thighs and shins on hip and knee groups, a hand anchor. Two teams: Azure (blue shirt, navy shorts) and Amber (orange shirt, red shorts); different skin tones and hair styles.
+* A pose function per state returns channels (hip height, torso pitch / twist, head, both shoulders (pitch, roll), elbows, both hips, both knees, body offset, air height). Ready stance breathes; run cycle from gait phase and speed; dig (platform arms, deep knees), set (hands above forehead, extend), spike (arch back, cock the hitting arm, swing through), block (arms straight up, jump), serve toss and serve, dive (body flat, arms forward), get-up, celebrate (hop with arms up), sad, referee sitting / raising a flag. Keyframed with ease-in-out, then every channel goes through a critically damped spring so poses never snap. Feet stay on the sand: hip height is derived from leg length when grounded. The referee turns his head to follow the ball.
+
+BALL AND PHYSICS
+
+* Ball: faceted sphere with white / yellow / blue panels, tumbling with its velocity, blob shadow that shrinks with height, a short streak behind fast shots, a yellow landing ring for human players.
+* Integrate at 120 Hz: exponential air drag (0.13 / s), gravity 9.81, optional wind acceleration that drifts slowly (Calm / Breeze / Gale). A launch solver (iterative, with drag) finds the velocity that lands the ball on a target after time T; try several flight times and pick the first that clears the net with margin; if none does, loft it.
+* Net: a band between the bottom and top tape across the posts; the ball slows, drops or pops up, the net wobbles, a "net" event fires. Sand: landing ends the rally; the ball then bounces and rolls dead.
+
+RULES
+
+* Rally scoring to 21 (selectable 11 / 15 / 21), win by two. Server rotates within the pair at each side-out. Teams change sides every 7 points (players walk across). Three touches per side, no double hit by the same player, a block does not count as a touch and gives the other side three fresh touches, no playing the ball over the net (only blocks may reach across), ball in if any part touches the lines (12 cm tolerance). Calls: ACE, KILL SHOT, TIP IN, STUFF BLOCK, BLOCK DEFLECTED, DROPPED, INTO THE NET, OUT, DOUBLE HIT, FOUR HITS, SERVICE FAULT, MATCH POINT. After a point: whistle, referee flag, winners celebrate, losers slump, 2.8 s later the next serve. Match over: celebration then an automatic new match (endless).
+
+ACTIONS AND CONTACT
+
+* Each action (dig, set, spike, block, dive, serve) has a duration, a contact window and a hit point with a reach radius in front of the player. If the ball is inside the sphere during the window and on the player's side, contact happens: the ball is relaunched toward a target chosen by the play type with an error that depends on skill (Easy / Normal / Pro), incoming ball speed and how low the touch is. First touch: pass toward the setter's zone (sometimes a shank); second: a high set 1 m off the net toward the partner; third: spike at the open court away from the defenders (random weighting so it is not perfect), tip, or a free ball when out of position. Occasional unforced errors (hit out, into the tape, serve into the net).
+* Jumps: spike and block jump shortly after the action starts (vy about 5 m/s) so the hit point rises with the player; sand puffs on landings, slides and dives.
+
+AI (both teams, also the partner of the human)
+
+* Predict the ball path (sampled trajectory with drag and wind). For each candidate action find the earliest sample where the ball is in the action's height band and the player, at running speed (slower when receiving a serve), can arrive with the action's lead time; the pair picks the player / action with the best score, the other player takes a support role (drop to the net to set, cover behind the attack). Never plays a ball that is on the opponent's side. Defence: one blocker at the net who jumps when the attacker's swing begins (probability by skill) and one back defender who reads the set. Serve: walk to the baseline, toss (the ball is released from the hand and the serve starts near the apex), aim at a receiver or the seams, loft if the flat line would hit the net.
+
+HUMAN CONTROL
+
+* Modes: Watch (both pairs on autopilot, the default), Azure, Amber, Two players on one keyboard. Controls: WASD / arrows run (Shift sprint), Space = serve (first press tosses, second hits at the top) or pass / set / dig chosen by the ball's height, J = jump (spike if your pair has the ball, block if theirs does), K = dive; holding a direction while you hit aims the ball. The controlled player is the one nearer the landing spot; an arrow bobs over him. Movement is camera-relative. Input is ignored during positioning; the human server can slide along the baseline. Touch: a round joystick plus Play / Jump / Dive buttons in a dock below the stage, only on coarse pointers.
+
+CAMERAS
+
+* Director (default): behind the server during the serve, side TV during rallies with a varying pick (baseline, tactical, ball cam), close on the winners after a point, slow orbit when the match ends; Side TV, Baseline, Tactical, Ball cam, Island. Zoom expressed in metres of visible width, corrected for the stage aspect ratio. Drag to turn, wheel / pinch to zoom, Q / E to rotate, 1-6 to pick, L light, P pause, N new match, M sound.
+
+UI (CSS tokens on :root with a dark scheme; fonts: Alfa Slab One, Oswald, Public Sans)
+
+* Masthead with the live score, a framed stage with the score bug (two rows with kit swatches, serving ball, touch pips, big score), a touches counter, call-out captions, chips (paused / speed / camera / wind) and the latest log line; a control panel on the right (below on phones): mode, level, play-to, wind, speed, New match / Pause; how-to-play; camera, light, turn / zoom, pixel size, Outlines / Dither / Raw 3D / Sound / Stands lift; match stats table (points, aces, kill shots, stuff blocks, errors, games won, longest rally); rally log; a "How it's drawn" note with the palette swatches. No horizontal scroll at 390 px.
+* Sound with the Web Audio API only (off by default): forearm pass thump, finger-set pop, spike / serve slap, block thud, net rustle, sand thump, whistle trill (oscillator with fast pitch LFO), crowd cheer, slides, waves and crowd murmur ambience, now and then a gull chirp.
+
+QUALITY BAR
+
+* Headless checks: no console errors; thousands of simulated seconds in every mode and level with no NaN, no stuck state (positioning never waits forever, serve never stalls), the rules above enforced (no four hits, no reaching over the net), average rally 6-9 touches; all panel buttons and keys work; the touch dock appears only on coarse pointers; scan the file for personal data (emails, paths) before publishing. Test the sim by stepping it deterministically; software GL in headless Chromium is far too slow for real-time checks.
